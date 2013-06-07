@@ -25,15 +25,14 @@
 
 package info.dumparun.imageviewer.dropbox;
 
+import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.SharedPreferences.Editor;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.util.Log;
-import android.widget.Button;
 import android.widget.ImageView;
-import android.widget.LinearLayout;
 import android.widget.Toast;
 
 import com.dropbox.client2.DropboxAPI;
@@ -78,47 +77,29 @@ public class DropBoxAPISetup {
 
 	DropboxAPI<AndroidAuthSession> mApi;
 
-	private boolean mLoggedIn;
-
-	// Android widgets
-	private Button mSubmit;
-	private LinearLayout mDisplay;
-	private Button mPhoto;
-	private Button mRoulette;
-
 	private ImageView mImage;
 
 	private final String PHOTO_DIR = "/Photos/";
 
-	final static private int NEW_PICTURE = 1;
-	private String mCameraFileName;
-
-	@Override
-	protected void setUpDropBoxAPI() {
+	protected void setUpDropBoxAPI(Context applicationContext) {
 
 		// We create a new AuthSession so that we can use the Dropbox API.
-		AndroidAuthSession session = buildSession();
+		AndroidAuthSession session = buildSession(applicationContext);
 		mApi = new DropboxAPI<AndroidAuthSession>(session);
 
+		if (!checkAppKeySetup(applicationContext))
+			return;
 
-		checkAppKeySetup();
+		// Start the remote authentication
+		mApi.getSession().startAuthentication(applicationContext);
 
-					// Start the remote authentication
-					mApi.getSession().startAuthentication(DBRoulette.this);
-
-				DownloadRandomPicture download = new DownloadRandomPicture(
-						DBRoulette.this, mApi, PHOTO_DIR, mImage);
-				download.execute();
-
-				// Display the proper UI state if logged in or not
-		setLoggedIn(mApi.getSession().isLinked());
+		DownloadRandomPicture download = new DownloadRandomPicture(
+				applicationContext, mApi, PHOTO_DIR, mImage);
+		download.execute();
 
 	}
 
-	
-
-	@Override
-	protected void setUpDropBoxAPIOnResume() {
+	protected void setUpDropBoxAPIOnResume(Context applicationContext) {
 		AndroidAuthSession session = mApi.getSession();
 
 		// The next part must be inserted in the onResume() method of the
@@ -131,32 +112,31 @@ public class DropBoxAPISetup {
 
 				// Store it locally in our app for later use
 				TokenPair tokens = session.getAccessTokenPair();
-				storeKeys(tokens.key, tokens.secret);
-				setLoggedIn(true);
+				storeKeys(tokens.key, tokens.secret, applicationContext);
 			} catch (IllegalStateException e) {
-				showToast("Couldn't authenticate with Dropbox:"
-						+ e.getLocalizedMessage());
+				showToast(
+						"Couldn't authenticate with Dropbox:"
+								+ e.getLocalizedMessage(), applicationContext);
 				Log.i(TAG, "Error authenticating", e);
 			}
 		}
 	}
 
-	
-	private void logOut() {
+	public void logOut(Context applicationContext) {
 		// Remove credentials from the session
 		mApi.getSession().unlink();
 
 		// Clear our stored keys
-		clearKeys();
+		clearKeys(applicationContext);
 	}
 
-	
-	private void checkAppKeySetup() {
+	private boolean checkAppKeySetup(Context applicationContext) {
 		// Check to make sure that we have a valid app key
 		if (APP_KEY.startsWith("CHANGE") || APP_SECRET.startsWith("CHANGE")) {
-			showToast("You must apply for an app key and secret from developers.dropbox.com, and add them to the DBRoulette ap before trying it.");
-			finish();
-			return;
+			showToast(
+					"You must apply for an app key and secret from developers.dropbox.com, and add them to the DBRoulette ap before trying it.",
+					applicationContext);
+			return false;
 		}
 
 		// Check if the app has set up its manifest properly.
@@ -164,18 +144,20 @@ public class DropBoxAPISetup {
 		String scheme = "db-" + APP_KEY;
 		String uri = scheme + "://" + AuthActivity.AUTH_VERSION + "/test";
 		testIntent.setData(Uri.parse(uri));
-		PackageManager pm = getPackageManager();
+		PackageManager pm = applicationContext.getPackageManager();
 		if (0 == pm.queryIntentActivities(testIntent, 0).size()) {
 			showToast("URL scheme in your app's "
 					+ "manifest is not set up correctly. You should have a "
 					+ "com.dropbox.client2.android.AuthActivity with the "
-					+ "scheme: " + scheme);
-			finish();
+					+ "scheme: " + scheme, applicationContext);
+			return false;
 		}
+		return true;
 	}
 
-	private void showToast(String msg) {
-		Toast error = Toast.makeText(this, msg, Toast.LENGTH_LONG);
+	private void showToast(String msg, Context applicationContext) {
+		Toast error = Toast
+				.makeText(applicationContext, msg, Toast.LENGTH_LONG);
 		error.show();
 	}
 
@@ -186,8 +168,9 @@ public class DropBoxAPISetup {
 	 * 
 	 * @return Array of [access_key, access_secret], or null if none stored
 	 */
-	private String[] getKeys() {
-		SharedPreferences prefs = getSharedPreferences(ACCOUNT_PREFS_NAME, 0);
+	private String[] getKeys(Context applicationContext) {
+		SharedPreferences prefs = applicationContext.getSharedPreferences(
+				ACCOUNT_PREFS_NAME, 0);
 		String key = prefs.getString(ACCESS_KEY_NAME, null);
 		String secret = prefs.getString(ACCESS_SECRET_NAME, null);
 		if (key != null && secret != null) {
@@ -205,27 +188,29 @@ public class DropBoxAPISetup {
 	 * local store, rather than storing user name & password, and
 	 * re-authenticating each time (which is not to be done, ever).
 	 */
-	private void storeKeys(String key, String secret) {
+	private void storeKeys(String key, String secret, Context applicationContext) {
 		// Save the access key for later
-		SharedPreferences prefs = getSharedPreferences(ACCOUNT_PREFS_NAME, 0);
+		SharedPreferences prefs = applicationContext.getSharedPreferences(
+				ACCOUNT_PREFS_NAME, 0);
 		Editor edit = prefs.edit();
 		edit.putString(ACCESS_KEY_NAME, key);
 		edit.putString(ACCESS_SECRET_NAME, secret);
 		edit.commit();
 	}
 
-	private void clearKeys() {
-		SharedPreferences prefs = getSharedPreferences(ACCOUNT_PREFS_NAME, 0);
+	private void clearKeys(Context applicationContext) {
+		SharedPreferences prefs = applicationContext.getSharedPreferences(
+				ACCOUNT_PREFS_NAME, 0);
 		Editor edit = prefs.edit();
 		edit.clear();
 		edit.commit();
 	}
 
-	private AndroidAuthSession buildSession() {
+	private AndroidAuthSession buildSession(Context applicationContext) {
 		AppKeyPair appKeyPair = new AppKeyPair(APP_KEY, APP_SECRET);
 		AndroidAuthSession session;
 
-		String[] stored = getKeys();
+		String[] stored = getKeys(applicationContext);
 		if (stored != null) {
 			AccessTokenPair accessToken = new AccessTokenPair(stored[0],
 					stored[1]);
